@@ -1,12 +1,10 @@
 mod utils;
 use inputbot::KeybdKey::ScrollLockKey;
-use slint::{ModelRc, VecModel, SharedPixelBuffer, Rgba8Pixel, Image};
+use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use utils::cli_handler::{handle_input, increment, run_cli, State};
-use utils::db_handler::{
-    add_new_counter, connect, get_all_counters, get_row_id, read_counter,
-};
+use utils::db_handler::{add_new_counter, connect, get_all_counters, get_row_id, read_counter};
 
 slint::slint! {
     import { VerticalBox, Button, HorizontalBox, ListView, ListView ,LineEdit} from "std-widgets.slint";
@@ -123,7 +121,9 @@ macro_rules! fetch_counters {
                 );
                 $window.set_counters_list(ModelRc::new(v));
             }
-            Err(_) => {set_error!($window, "Failed to load counters.")}
+            Err(_) => {
+                set_error!($window, "Failed to load counters.")
+            }
         }
     }};
 }
@@ -132,12 +132,15 @@ macro_rules! add_counter {
     ($window: expr) => {{
         let value = $window.get_add_new_counter_text();
         match add_new_counter(&value) {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(_) => set_error!($window, "Failed to add new counter"),
         }
         let id = match get_row_id(&value) {
             Ok(r) => r,
-            Err(_) => {set_error!($window, "Failed to reach DB"); return;},
+            Err(_) => {
+                set_error!($window, "Failed to reach DB");
+                return;
+            }
         };
         let res = read_counter(id);
         match res {
@@ -166,7 +169,7 @@ macro_rules! increment_counter {
             Err(_) => {
                 println!("Error reading counter.");
                 set_error!($window, "Error reading counter.");
-            },
+            }
         };
     }};
 }
@@ -208,7 +211,10 @@ fn main() {
             ScrollLockKey.block_bind(move || {
                 let window_weak = match window_weaks.lock() {
                     Ok(r) => r,
-                    Err(_) => {println!("Error unpacking window."); return;}
+                    Err(_) => {
+                        println!("Error unpacking window.");
+                        return;
+                    }
                 };
                 window_weak.upgrade_in_event_loop(move |window| {
                     let idx = window.get_loaded_counter_id();
@@ -230,7 +236,10 @@ fn main() {
         window.on_add_counter(move || {
             let window = match window_weak.upgrade() {
                 Some(v) => v,
-                None => {println!("Error unpacking window in add counter."); return;},
+                None => {
+                    println!("Error unpacking window in add counter.");
+                    return;
+                }
             };
             add_counter!(window);
         });
@@ -239,7 +248,10 @@ fn main() {
         window.on_count(move || {
             let window = match window_weak.upgrade() {
                 Some(v) => v,
-                None => {println!("Error unpacking window in count."); return;},
+                None => {
+                    println!("Error unpacking window in count.");
+                    return;
+                }
             };
             increment_counter!(window);
         });
@@ -248,17 +260,31 @@ fn main() {
         window.on_loaded(move || {
             let window = match window_weak.upgrade() {
                 Some(v) => v,
-                None => {println!("Error unpacking window when loading."); return;},
+                None => {
+                    println!("Error unpacking window when loading.");
+                    return;
+                }
             };
             let loaded = window.get_loaded_counter_name();
-            let mut path: String = "img/".to_owned();
+            let mut path: String = "https://play.pokemonshowdown.com/sprites/dex/".to_owned();
             path.push_str(&loaded);
             path.push_str(".png");
-            let mut cat_image = match image::open(path) {
+
+            let img_bytes = match reqwest::blocking::get(path.to_ascii_lowercase()) {
+                Ok(r) => match r.bytes() {
+                    Ok(r) => r,
+                    Err(e) => {set_error!(window, e.to_string()); return; },
+                },
+                Err(e) => {set_error!(window, e.to_string()); return; },
+            };
+            let mut cat_image = match image::load_from_memory(&img_bytes) {
                 Ok(r) => r.into_rgba8(),
                 Err(_) => match image::open("img/unknown.png") {
                     Ok(r) => r.into_rgba8(),
-                    Err(_) => {set_error!(window, "Error loading sprite.");return; },
+                    Err(_) => {
+                        set_error!(window, "Error loading sprite.");
+                        return;
+                    }
                 },
             };
 
