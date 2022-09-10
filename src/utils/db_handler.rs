@@ -57,7 +57,10 @@ pub fn increment_counter(id: i32) -> Result<i32>{
         = stmt.query_row(params![id], |row| {
          row.get(0)
         });
-    let count:i32 = counter.expect("Failed to increment counter");
+    let count:i32 = match counter {
+        Ok(r) => r,
+        Err(e) => return Err(e),
+    };
     conn.execute(
             "UPDATE counters SET count = ?1 WHERE rowid = ?2",
                 params![count + 1, id]

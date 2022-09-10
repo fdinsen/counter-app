@@ -1,14 +1,11 @@
 mod utils;
 use inputbot::KeybdKey::ScrollLockKey;
-use slint::{ModelRc, VecModel};
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc,Mutex};
+use slint::{ModelRc, VecModel, SharedPixelBuffer, Rgba8Pixel, Image};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 use utils::cli_handler::{handle_input, increment, run_cli, State};
 use utils::db_handler::{
-    add_new_counter, connect, get_all_counters, get_row_id, read_counter, Counter,
+    add_new_counter, connect, get_all_counters, get_row_id, read_counter,
 };
 
 slint::slint! {
@@ -21,17 +18,19 @@ slint::slint! {
     HelloWorld := Window{
         title: "Counter Test App";
         width: 400px;
-        height: 400px;
+        height: 420px;
         property <int> counter: 0;
         property <int> loaded-counter-id: -1;
         property <string> loaded-counter-name: "";
         property <string> add-new-counter-text: "Enter name";
+        property <string> error-msg: "";
         property <[slintCounter]> counters-list : [];
+        property <image> image : @image-url("img/unknown.png");
         callback add-counter <=> savebutton.clicked;
         callback count <=> button.clicked;
         callback loaded <=> fakebtn.clicked;
         HorizontalBox {
-            width: 100px;
+            width: 400px;
             height: 100px;
             button := Button {
                 text: "Counter: " + counter;
@@ -42,6 +41,11 @@ slint::slint! {
             Text {
                 text: "Loaded Counter: " + loaded-counter-name;
                 color: green;
+            }
+            img := Image {
+                width: 100px;
+                source: image;
+                image-fit: fill;
             }
         }
         HorizontalBox {
@@ -58,6 +62,7 @@ slint::slint! {
                 }
                 accepted => {
                     add-counter();
+                    loaded();
                 }
             }
             savebutton := Button {
@@ -91,8 +96,13 @@ slint::slint! {
                         color: black;
                         vertical-alignment: center;
                     }
-                    clicked => {loaded-counter-id = data.id; counter = data.counter; loaded-counter-name = data.name;}
+                    clicked => {loaded-counter-id = data.id; counter = data.counter; loaded-counter-name = data.name; loaded();}
                 }
+        }
+        Text {
+            y: 400px;
+            color: red;
+            text: error-msg;
         }
     }
 }
@@ -113,7 +123,7 @@ macro_rules! fetch_counters {
                 );
                 $window.set_counters_list(ModelRc::new(v));
             }
-            Err(_) => {}
+            Err(_) => {set_error!($window, "Failed to load counters.")}
         }
     }};
 }
@@ -121,8 +131,14 @@ macro_rules! fetch_counters {
 macro_rules! add_counter {
     ($window: expr) => {{
         let value = $window.get_add_new_counter_text();
-        add_new_counter(&value);
-        let id = get_row_id(&value).unwrap();
+        match add_new_counter(&value) {
+            Ok(_) => {},
+            Err(_) => set_error!($window, "Failed to add new counter"),
+        }
+        let id = match get_row_id(&value) {
+            Ok(r) => r,
+            Err(_) => {set_error!($window, "Failed to reach DB"); return;},
+        };
         let res = read_counter(id);
         match res {
             Ok(r) => {
@@ -134,6 +150,7 @@ macro_rules! add_counter {
             }
             Err(_) => {
                 println!("Counter with name {:?} does not exist.", value);
+                set_error!($window, "Counter with given name does not exist.")
             }
         };
     }};
@@ -146,8 +163,17 @@ macro_rules! increment_counter {
         let res = read_counter(value);
         match res {
             Ok(r) => $window.set_counter(r.counter),
-            Err(_) => println!("Error reading counter"),
+            Err(_) => {
+                println!("Error reading counter.");
+                set_error!($window, "Error reading counter.");
+            },
         };
+    }};
+}
+
+macro_rules! set_error {
+    ($window: expr, $msg: expr) => {{
+        $window.set_error_msg(slint::SharedString::from($msg));
     }};
 }
 
@@ -175,66 +201,76 @@ fn main() {
             }
         }
     } else {
-        let mut id = -1;
-
         let window = HelloWorld::new();
         let window_weaks = Arc::new(Mutex::new(window.as_weak()));
         thread::spawn(move || {
             ScrollLockKey.unbind();
             ScrollLockKey.block_bind(move || {
-                println!("pressed.");
-                let window_weak = window_weaks.lock().unwrap();
+                let window_weak = match window_weaks.lock() {
+                    Ok(r) => r,
+                    Err(_) => {println!("Error unpacking window."); return;}
+                };
                 window_weak.upgrade_in_event_loop(move |window| {
-                    println!("In loop.");
                     let idx = window.get_loaded_counter_id();
                     increment(idx);
-    
+
                     let res = read_counter(idx);
                     match res {
                         Ok(r) => window.set_counter(r.counter),
-                        Err(_) => println!("Error reading counter"),
+                        Err(_) => set_error!(window, "Error reading counter"),
                     };
                 })
-                
             });
             inputbot::handle_input_events();
-            
         });
 
-        // thread::spawn(move || {
-        //     let win_weak = window_weak.to_owned();
-        //     while true {
-        //         let win = win_weak.upgrade();
-        //         let win = match win {
-        //             Some(w) => w,
-        //             None => {println!("empty window."); continue;},
-        //         };
-        //         let loadedid = win.get_loaded_counter_id();
-        //         if loadedid != id {
-        //             id = loadedid;
-        //         }
-        //         let res = read_counter(id);
-        //         match res {
-        //             Ok(r) => win.set_counter(r.counter),
-        //             Err(_) => println!("Error reading counter"),
-        //         };
-        //         println!("Test");
-        //         thread::sleep(Duration::from_millis(10));
-        //     }
-        // });
-
         fetch_counters!(window);
-        
+
         let window_weak = window.as_weak();
         window.on_add_counter(move || {
-            let window = window_weak.upgrade().unwrap();
+            let window = match window_weak.upgrade() {
+                Some(v) => v,
+                None => {println!("Error unpacking window in add counter."); return;},
+            };
             add_counter!(window);
         });
 
         let window_weak = window.as_weak();
         window.on_count(move || {
-            let window = window_weak.upgrade().unwrap();
+            let window = match window_weak.upgrade() {
+                Some(v) => v,
+                None => {println!("Error unpacking window in count."); return;},
+            };
             increment_counter!(window);
+        });
+
+        let window_weak = window.as_weak();
+        window.on_loaded(move || {
+            let window = match window_weak.upgrade() {
+                Some(v) => v,
+                None => {println!("Error unpacking window when loading."); return;},
+            };
+            let loaded = window.get_loaded_counter_name();
+            let mut path: String = "img/".to_owned();
+            path.push_str(&loaded);
+            path.push_str(".png");
+            let mut cat_image = match image::open(path) {
+                Ok(r) => r.into_rgba8(),
+                Err(_) => match image::open("img/unknown.png") {
+                    Ok(r) => r.into_rgba8(),
+                    Err(_) => {set_error!(window, "Error loading sprite.");return; },
+                },
+            };
+
+            image::imageops::colorops::brighten_in_place(&mut cat_image, 20);
+
+            let buffer = SharedPixelBuffer::<Rgba8Pixel>::clone_from_slice(
+                cat_image.as_raw(),
+                cat_image.width(),
+                cat_image.height(),
+            );
+            let image = Image::from_rgba8(buffer);
+            window.set_image(image);
         });
 
         window.run();
