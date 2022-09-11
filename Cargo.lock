@@ -589,12 +589,11 @@ dependencies = [
 name = "counter_app"
 version = "0.1.0"
 dependencies = [
+ "bytes 1.2.1",
  "image",
  "inputbot",
  "reqwest",
  "rusqlite",
- "serde",
- "serde_json",
  "slint",
 ]
 

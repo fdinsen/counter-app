@@ -1,10 +1,12 @@
+#![windows_subsystem = "windows"]
+
 mod utils;
 use inputbot::KeybdKey::ScrollLockKey;
 use slint::{Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, VecModel};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use utils::cli_handler::{handle_input, increment, run_cli, State};
-use utils::db_handler::{add_new_counter, connect, get_all_counters, get_row_id, read_counter};
+use utils::db_handler::{add_new_counter, connect, get_all_counters, get_row_id, read_counter, save_sprite, get_sprite};
 
 slint::slint! {
     import { VerticalBox, Button, HorizontalBox, ListView, ListView ,LineEdit} from "std-widgets.slint";
@@ -24,9 +26,10 @@ slint::slint! {
         property <string> error-msg: "";
         property <[slintCounter]> counters-list : [];
         property <image> image : @image-url("img/unknown.png");
-        callback add-counter <=> savebutton.clicked;
+        callback add-counter <=> fakesavebtn.clicked;
         callback count <=> button.clicked;
-        callback loaded <=> fakebtn.clicked;
+        callback loaded <=> fakeloadbtn.clicked;
+        callback refresh <=> refreshbutton.clicked;
         HorizontalBox {
             width: 400px;
             height: 100px;
@@ -59,6 +62,7 @@ slint::slint! {
                     add-new-counter-text = text;
                 }
                 accepted => {
+                    addNewBox.text = "Enter name";
                     add-counter();
                     loaded();
                 }
@@ -67,16 +71,26 @@ slint::slint! {
                 height: 30px;
                 width: 100px;
                 text: "Add new";
+                clicked => {
+                    addNewBox.text = "Enter name";
+                    add-counter();
+                    loaded();
+                }
             }
-            errorText := Text {
-                text: "";
-                color: red;
+            refreshbutton := Button {
+                height: 30px;
+                width: 80px;
+                text: "Refresh";
             }
         }
-        fakebtn := Button {
-            width: 400px;
-            height: 250px;
-            y: 150px;
+        fakeloadbtn := Button {
+            width: 0px;
+            height: 0px;
+            y: 0px;
+        }
+        fakesavebtn := Button {
+            width: 0px;
+            height: 0px;
         }
         ListView {
             width: 400px;
@@ -159,10 +173,10 @@ macro_rules! add_counter {
     }};
 }
 
-macro_rules! increment_counter {
-    ($window: expr) => {{
+macro_rules! update_counter {
+    ($window: expr, $do_increment: expr) => {{
         let value = $window.get_loaded_counter_id();
-        increment(value);
+        if($do_increment) {increment(value);}
         let res = read_counter(value);
         match res {
             Ok(r) => $window.set_counter(r.counter),
@@ -198,10 +212,7 @@ fn main() {
 
         while state != State::Exit {
             state = cliruntime(&id);
-            match state {
-                State::Load(next) => id = next,
-                _ => {}
-            }
+            if let State::Load(next) = state { id = next } // destructures but ignores errors
         }
     } else {
         let window = HelloWorld::new();
@@ -253,7 +264,20 @@ fn main() {
                     return;
                 }
             };
-            increment_counter!(window);
+            update_counter!(window, true);
+        });
+
+        let window_weak = window.as_weak();
+        window.on_refresh(move || {
+            let window = match window_weak.upgrade() {
+                Some(v) => v,
+                None => {
+                    println!("Error unpacking window in refresh");
+                    return;
+                }
+            };
+            fetch_counters!(window);
+            update_counter!(window, false);
         });
 
         let window_weak = window.as_weak();
@@ -270,13 +294,23 @@ fn main() {
             path.push_str(&loaded);
             path.push_str(".png");
 
-            let img_bytes = match reqwest::blocking::get(path.to_ascii_lowercase()) {
-                Ok(r) => match r.bytes() {
-                    Ok(r) => r,
-                    Err(e) => {set_error!(window, e.to_string()); return; },
-                },
-                Err(e) => {set_error!(window, e.to_string()); return; },
+            let img_bytes = match get_sprite(&loaded) {
+                Ok(r) => r,
+                Err(_) => {
+                    let img_bytes = match reqwest::blocking::get(path.to_ascii_lowercase()) {
+                        Ok(r) => match r.bytes() {
+                            Ok(r) => r,
+                            Err(e) => {set_error!(window, e.to_string()); return; },
+                        },
+                        Err(e) => {set_error!(window, e.to_string()); return; },
+                    };
+                    match save_sprite(&loaded,img_bytes) {
+                        Ok(b) => b,
+                        Err(e) => return,
+                    }
+                }
             };
+            
             let mut cat_image = match image::load_from_memory(&img_bytes) {
                 Ok(r) => r.into_rgba8(),
                 Err(_) => match image::open("img/unknown.png") {
@@ -304,13 +338,13 @@ fn main() {
 }
 
 fn cliruntime(current_id: &i32) -> State {
-    let id = current_id.clone();
-    let clonedid = id.clone();
+    let id = *current_id;
+    let clonedid = id;
     thread::spawn(move || {
         ScrollLockKey.unbind();
         ScrollLockKey.block_bind(move || {
-            let id2 = clonedid.clone();
-            println!("");
+            let id2 = clonedid;
+            println!();
             increment(id2);
         });
 

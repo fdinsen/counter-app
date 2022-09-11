@@ -1,4 +1,7 @@
-use rusqlite::{Connection, Result, params, Error};
+use std::io::{Write, SeekFrom, Seek, Read, ErrorKind};
+
+use rusqlite::{Connection, Result, params, Error, blob::Blob};
+use bytes::{Bytes, BytesMut, BufMut};
 
 const DB_PATH: &str = "count.db";
 
@@ -31,8 +34,14 @@ pub fn connect() -> Result<Connection> {
          )",
         [],
     )?;
-    
-    return Ok(conn);
+    conn.execute(
+        "create table if not exists sprites (
+             name text primary key,
+             img blob not null
+        )", 
+        [],
+    )?;
+    Ok(conn)
 }
 
 pub fn add_new_counter(name: &str) -> Result<()>{
@@ -78,7 +87,7 @@ pub fn read_counter(id: i32)-> Result<Counter> {
     let counter 
         = stmt.query_row(params![id], |row| {
          Ok(Counter {
-            id: id,
+            id,
             name: row.get(0)?,
             counter: row.get(1)?,
          })
@@ -118,10 +127,66 @@ pub fn get_all_counters() -> Result<Vec<Counter>, Error>{
     })?;
     let mut counters:Vec<Counter> = Vec::new();
     for counter in result{
-        match counter {
-            Ok(c) => {counters.push(c); },
-            Err(_) => (),
-        };
+        if let Ok(c) = counter {counters.push(c); } // destructuring but ignoring all errors.
     };
-    return Ok(counters);
+    Ok(counters)
+}
+
+pub fn get_sprite_row_id(name: &str)-> Result<i32> {
+    let conn = Connection::open(DB_PATH)?;
+    let mut stmt = conn.prepare(
+        "SELECT rowid FROM sprites WHERE name = ?1")?;
+    let id 
+        = stmt.query_row(params![name], |row| {
+         row.get(0)
+        });
+    let id = match id{
+        Ok(id) => id,
+        Err(e) => return Err(e),
+    };
+    Ok(id)
+}
+
+pub fn save_sprite(name: &str, img: Bytes) -> Result<Bytes> {
+    let conn = Connection::open(DB_PATH)?;
+    let _ = conn.execute(
+        "INSERT OR IGNORE INTO sprites (name, img) VALUES (?1, ZEROBLOB(22528)) RETURNING rowid",
+            params![name]
+    );
+    let rowid = match get_sprite_row_id(&name) {
+        Ok(rowid) => rowid,
+        Err(err) => {println!("hi: {:?}", name);return Err(err);},
+    };
+    let mut blob = conn.blob_open(rusqlite::DatabaseName::Main,"sprites", "img", rowid.into(), false)?;
+    match blob.write(&img) {
+        Ok(_) => Ok(img),
+        Err(_) => {println!("Failed.......");Ok(img)},
+    }
+}
+
+pub fn get_sprite(name: &str) -> Result<Bytes> {
+    let conn = Connection::open(DB_PATH)?;
+    let mut stmt = conn.prepare("SELECT rowid FROM sprites WHERE name = ?1")?;
+    let rowid:i32 = match stmt.query_row(params![name], |row| {
+        row.get(0)
+    }) {
+        Ok(r) => r,
+        Err(err) => return Err(err),
+    };
+    let mut blob = match conn.blob_open(rusqlite::DatabaseName::Main, "sprites", "img", rowid.into(), true) {
+        Ok(r) => r,
+        Err(err) => return Err(err),
+    };
+    blob.seek(SeekFrom::Start(0));
+    let mut buf = [0u8; 22528];
+    let bytes_read = blob.read(&mut buf[..]);
+    match bytes_read {
+        Ok(size) => {
+            let mut bytes = BytesMut::new();
+            bytes.reserve(size);
+            bytes.put_slice(&buf);
+            return Ok(bytes.freeze());
+        },
+        Err(err) => Err(rusqlite::Error::BlobSizeError),
+    }
 }
