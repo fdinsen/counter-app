@@ -1,26 +1,33 @@
-use std::io::{Write, SeekFrom, Seek, Read, ErrorKind};
+use std::{io::{Write, SeekFrom, Seek, Read, ErrorKind}, fmt};
 
-use rusqlite::{Connection, Result, params, Error, blob::Blob};
+use rusqlite::{Connection, params, Result, Error, blob::Blob};
 use bytes::{Bytes, BytesMut, BufMut};
 
 const DB_PATH: &str = "count.db";
 
 #[derive(Debug, Clone)]
-pub struct Counter {
+pub struct Pokemon {
     pub id: i32,
     pub name: String,
     pub counter: i32,
 }
 
-// impl Counter{
-//     pub fn new(&self, name: String) -> Self {
-//         Counter{
-//             name: name,
-//             counter: 0,
-//         }
-//     }
-//     pub fn to_string(&self) -> String {
-//         String::from(format!("name: {:?}, counter: {:?}",self.name, self.counter))
+impl Pokemon {
+    pub fn update_counter(&mut self, new_counter: i32) {
+        self.counter = new_counter;
+    }
+}
+
+// type Result<T> = std::result::Result<T, DBError>;
+
+// #[derive(Debug, Clone)]
+// struct DBError {
+//     msg: String,
+// }
+
+// impl fmt::Display for DBError {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         write!(f, "{:?}", self.msg)
 //     }
 // }
 
@@ -56,6 +63,10 @@ pub fn add_new_counter(name: &str) -> Result<()>{
 }
 
 pub fn increment_counter(id: i32) -> Result<i32>{
+    add_counter(id, 1)
+}
+
+pub fn add_counter(id: i32, amnt: i32) -> Result<i32>{
     if id == -1 {
         return Err(rusqlite::Error::InvalidQuery);
     }
@@ -72,12 +83,12 @@ pub fn increment_counter(id: i32) -> Result<i32>{
     };
     conn.execute(
             "UPDATE counters SET count = ?1 WHERE rowid = ?2",
-                params![count + 1, id]
+                params![count + amnt, id]
     )?;
-    Ok(count+1)
+    Ok(count+amnt)
 }
 
-pub fn read_counter(id: i32)-> Result<Counter> {
+pub fn read_counter(id: i32)-> Result<Pokemon> {
     if id == -1 {
         return Err(rusqlite::Error::InvalidQuery);
     }
@@ -86,7 +97,7 @@ pub fn read_counter(id: i32)-> Result<Counter> {
         "SELECT name, count FROM counters WHERE rowid = ?1")?;
     let counter 
         = stmt.query_row(params![id], |row| {
-         Ok(Counter {
+         Ok(Pokemon {
             id,
             name: row.get(0)?,
             counter: row.get(1)?,
@@ -114,18 +125,18 @@ pub fn get_row_id(name: &str)-> Result<i32> {
     Ok(counter)
 }
 
-pub fn get_all_counters() -> Result<Vec<Counter>, Error>{
+pub fn get_all_counters() -> Result<Vec<Pokemon>>{
     let conn = Connection::open(DB_PATH)?;
     let mut stmt = conn.prepare(
         "SELECT rowid, name, count FROM counters")?;
     let result = stmt.query_map([], |row| {
-        Ok(Counter{
+        Ok(Pokemon{
             id: row.get(0)?,
             name: row.get(1)?,
             counter: row.get(2)?,
         })
     })?;
-    let mut counters:Vec<Counter> = Vec::new();
+    let mut counters:Vec<Pokemon> = Vec::new();
     for counter in result{
         if let Ok(c) = counter {counters.push(c); } // destructuring but ignoring all errors.
     };
