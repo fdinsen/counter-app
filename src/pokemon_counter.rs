@@ -17,6 +17,7 @@ const GEN_6_PLUS_ODDS: f64 = 4096.0;
 const EGUI_KEY: egui::Key = egui::Key::Home;
 const KEYDB_KEY: KeybdKey = KeybdKey::HomeKey;
 const KEY_NAME: &str = "HOME";
+const COUNT_BUTTON_SIZE: [f32;2] = [120.0,50.0];
 
 pub const MIN_WINDOW_SIZE: Vec2 = Vec2::new(688.0, 524.0);
 
@@ -215,7 +216,8 @@ impl PokemonCounter {
     }
 
     fn counter_button(&mut self, ui: &mut Ui) {
-        if ui.button("Count").clicked() {
+        let button = ui.add_sized(COUNT_BUTTON_SIZE, Button::new("Count"));
+        if button.clicked() {
            self.update_counter(1);
         };
     }
