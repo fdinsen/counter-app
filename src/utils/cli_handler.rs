@@ -2,7 +2,7 @@ use crate::utils::db_handler::{
     add_new_counter, get_all_counters, get_row_id, increment_counter, read_counter,
 };
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum State {
     Exit,
     Cont,
@@ -22,42 +22,42 @@ macro_rules! run_cli {
 }
 pub(crate) use run_cli;
 
-pub fn handle_input(line: &String, current_id: i32) -> State {
+pub fn handle_input(line: &str, current_id: i32) -> State {
     let x = line.split("\r\n").collect::<Vec<&str>>();
-    let commands = x[0].split(" ").collect::<Vec<&str>>();
+    let commands = x[0].split(' ').collect::<Vec<&str>>();
     let cmd = &commands[0].to_lowercase() as &str;
     match cmd {
         "help" => {
             print_help();
-            return State::Cont;
+            State::Cont
         }
         "list" => {
             list_counters();
-            return State::Cont;
+            State::Cont
         }
         "add" => {
             let commands = add_counter(commands);
             let next = load_counter(commands);
-            return State::Load(next);
+            State::Load(next)
         }
         "load" => {
             let next = load_counter(commands);
-            return State::Load(next);
+            State::Load(next)
         }
         "" => {
             increment(current_id);
-            return State::Cont;
+            State::Cont
         }
-        "exit" => return State::Exit,
+        "exit" => State::Exit,
         _ => {
             println!("Unknown command {:?}", commands[0]);
-            return State::Cont;
+            State::Cont
         }
     }
 }
 
 fn print_help() {
-    println!("");
+    println!();
     println!("LIST\t\tLists all the existing counters.");
     println!("ADD name\tAdds a new counter with the given name.");
     println!("LOAD name\tSets the given counter as the active one.");
@@ -75,15 +75,13 @@ fn list_counters() {
             return;
         }
     };
-    if counters.len() > 0 {
+    if !counters.is_empty(){
         for counter in counters {
             println!("{:?}: {:?}", counter.name, counter.counter);
         }
     } else {
         println!("No counters saved. Use ADD command to create new.");
     }
-
-    return;
 }
 
 fn add_counter(commands: Vec<&str>) -> Vec<&str> {
@@ -97,7 +95,7 @@ fn add_counter(commands: Vec<&str>) -> Vec<&str> {
     } else {
         println!("Error, no name provided");
     }
-    return commands;
+    commands
 }
 
 fn load_counter(commands: Vec<&str>) -> i32 {
