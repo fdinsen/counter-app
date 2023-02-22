@@ -391,7 +391,11 @@ impl PokemonCounter {
         });
     }
     fn current_sprite(&mut self, ui: &mut Ui) {
-        let current_name = self.get_current().unwrap().name.clone();
+
+        let current_name = match self.get_current() {
+            Some(v) => v.name.clone(),
+            None => return,
+        };
         let path = generate_sprite_path(&current_name);
 
         let img_bytes = match get_sprite(&current_name) {
